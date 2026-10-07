@@ -1,0 +1,110 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--overlay);
+  display: flex;
+  justify-content: flex-end;
+  animation: fade var(--dur-2) var(--ease);
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+.panel {
+  width: min(540px, 100%);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow-lg);
+  animation: slide var(--dur-3) var(--ease);
+}
+@keyframes slide {
+  from {
+    transform: translateX(32px);
+    opacity: 0;
+  }
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  border-bottom: 1px solid var(--rule);
+}
+.src {
+  color: var(--ink-500);
+  font-size: var(--fs-sm);
+}
+.heading {
+  margin-top: var(--s-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-lg);
+  font-weight: 500;
+}
+.close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink-600);
+  cursor: pointer;
+}
+.close:hover {
+  border-color: var(--rule-strong);
+  color: var(--ink-900);
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-5);
+}
+.text {
+  white-space: pre-wrap;
+  line-height: 1.8;
+  color: var(--ink-800);
+  font-size: var(--fs-base);
+}
+.muted {
+  color: var(--ink-500);
+}
+.currency {
+  margin-top: var(--s-4);
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--rule);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  color: var(--escalate-700);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-top: 1px solid var(--rule);
+  background: var(--surface-sunken);
+}
+.verbatim {
+  font-size: var(--fs-xs);
+  color: var(--ink-500);
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}

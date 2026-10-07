@@ -1,0 +1,361 @@
+import { useEffect, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { query as runQuery, translate as runTranslate } from "../api/client";
+import { useUiLang } from "../i18n/useUiLang";
+import { LANGS } from "../i18n/strings";
+import AppShell from "../components/AppShell";
+import Button from "../components/Button";
+import Badge from "../components/Badge";
+import Card, { CardHeader } from "../components/Card";
+import StepIndicator from "../components/StepIndicator";
+import Icon from "../components/Icon";
+import ConfidenceMeter from "../components/ConfidenceMeter";
+import CitationCard from "../components/CitationCard";
+import ClaimList from "../components/ClaimList";
+import ConflictList from "../components/ConflictList";
+import CaseNotes from "../components/CaseNotes";
+import PassageDrawer from "../components/PassageDrawer";
+import FeedbackWidget from "../components/FeedbackWidget";
+import RetrievalDetails from "../components/RetrievalDetails";
+import AnswerSkeleton from "../components/Skeleton";
+import styles from "./Result.module.css";
+
+export default function Result() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const jurisdiction = location.state?.jurisdiction || "india";
+  const formulationCategory = location.state?.formulationCategory || null;
+  const formulationLabel =
+    location.state?.formulationLabel || formulationCategory || "Not classified";
+  const question = location.state?.query || "";
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [viewing, setViewing] = useState(null); // citation whose passage is open
+  const uiLang = useUiLang();
+  const [xlate, setXlate] = useState(null); // { text } translated answer
+  const [showEnglish, setShowEnglish] = useState(false);
+
+  useEffect(() => {
+    if (!question) {
+      setError("No question was submitted.");
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    runQuery(
+      { query: question, jurisdiction, formulationCategory },
+      { signal: controller.signal },
+    )
+      .then(setData)
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        setError(err.message || "The query failed.");
+      })
+      .finally(() => setLoading(false));
+    return () => controller.abort();
+  }, [question, jurisdiction, formulationCategory]);
+
+  const escalated = data?.confidence?.status === "escalate";
+
+  useEffect(() => {
+    setXlate(null);
+    setShowEnglish(false);
+    if (!data || escalated || uiLang === "en" || !data.answer) return;
+    const ac = new AbortController();
+    runTranslate({ text: data.answer, lang: uiLang }, { signal: ac.signal })
+      .then((res) => {
+        if (res.translated) setXlate({ text: res.text });
+      })
+      .catch(() => {});
+    return () => ac.abort();
+  }, [data, escalated, uiLang]);
+
+  const langName =
+    LANGS.find((l) => l.code === uiLang)?.name || uiLang;
+  const outsideCorpus =
+    escalated && !(data?.retrieval?.top_sections?.length);
+  const staleCitations = (data?.citations || []).filter((c) => c.amended_by);
+
+  return (
+    <AppShell context={{ jurisdiction, formulationLabel }} width="wide">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => navigate("/ask", { state: location.state })}
+        className={styles.back}
+      >
+        <Icon name="arrowLeft" size={14} />
+        Edit question
+      </Button>
+
+      <StepIndicator current={2} />
+
+      <p className={styles.question}>{question}</p>
+
+      {data?.jurisdiction_note && !loading && (
+        <div className={styles.mismatch}>
+          <p>{data.jurisdiction_note}</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              navigate(
+                "/result",
+                {
+                  state: {
+                    ...location.state,
+                    jurisdiction:
+                      jurisdiction === "india" ? "international" : "india",
+                  },
+                  replace: true,
+                },
+              )
+            }
+          >
+            Switch to {jurisdiction === "india" ? "International" : "India"} &amp;
+            re-ask
+          </Button>
+        </div>
+      )}
+
+      {loading && <AnswerSkeleton />}
+
+      {error && !loading && (
+        <Card tone="danger">
+          <CardHeader eyebrow="Request failed" title="Couldn't get an answer" />
+          <p>{error}</p>
+          <Button
+            variant="secondary"
+            className={styles.retry}
+            onClick={() => navigate("/ask", { state: location.state })}
+          >
+            Try again
+          </Button>
+        </Card>
+      )}
+
+      {data && !loading && !error && (
+        <div className={styles.grid}>
+          <div className={styles.main}>
+            <Card tone={escalated ? "warn" : "default"}>
+              <CardHeader
+                eyebrow={
+                  escalated
+                    ? "Escalated"
+                    : data.from_faq
+                      ? "Human-reviewed answer"
+                      : "Source-cited guidance"
+                }
+                title={
+                  escalated ? "Routed to a human facilitator" : "Answer"
+                }
+                aside={
+                  <span className={styles.badges}>
+                    {data.cached && <Badge tone="neutral">cached</Badge>}
+                    {data.from_faq && <Badge tone="accent">reviewed</Badge>}
+                    <Badge tone={escalated ? "warn" : "accent"} variant="solid">
+                      {escalated ? "Escalated" : "Answered"}
+                    </Badge>
+                  </span>
+                }
+              />
+              {xlate && !showEnglish ? (
+                <>
+                  <p className={styles.answer}>{xlate.text}</p>
+                  <p className={styles.escalateNote}>
+                    Machine translation into {langName}. Citations and quoted law
+                    stay in English.{" "}
+                    <button
+                      type="button"
+                      className={styles.linkBtn}
+                      onClick={() => setShowEnglish(true)}
+                    >
+                      Show English
+                    </button>
+                  </p>
+                </>
+              ) : !escalated && data.claims?.length ? (
+                <ClaimList
+                  claims={data.claims}
+                  citations={data.citations}
+                  onCite={setViewing}
+                />
+              ) : (
+                <p className={styles.answer}>{data.answer}</p>
+              )}
+              {xlate && showEnglish && (
+                <button
+                  type="button"
+                  className={styles.linkBtn}
+                  onClick={() => setShowEnglish(false)}
+                >
+                  Show {langName} translation
+                </button>
+              )}
+              {escalated && (
+                <p className={styles.escalateNote}>
+                  Retrieval support or model confidence was below threshold, so
+                  the assistant did not guess. A human IP facilitator can take
+                  this from here.
+                </p>
+              )}
+              {data.from_faq && (
+                <p className={styles.reviewedNote}>
+                  This answer was written and reviewed by a human IP facilitator,
+                  not generated. It is served ahead of the model for this
+                  question.
+                </p>
+              )}
+              {outsideCorpus && (
+                <p className={styles.escalateNote}>
+                  No passage in the corpus was on point — this question may fall
+                  outside what we cover. See the{" "}
+                  <Link to="/coverage">coverage map</Link> for the instruments
+                  the assistant can answer from.
+                </p>
+              )}
+              <FeedbackWidget
+                meta={{
+                  query: question,
+                  jurisdiction,
+                  formulationCategory,
+                  answerStatus: data.confidence?.status,
+                  citedSections: (data.citations || []).map((c) => c.section),
+                }}
+              />
+            </Card>
+
+            {staleCitations.length > 0 && (
+              <Card tone="warn">
+                <CardHeader
+                  eyebrow="Check currency"
+                  title="A cited provision may have been amended"
+                />
+                <ul className={styles.staleList}>
+                  {staleCitations.map((c, i) => (
+                    <li key={i}>
+                      <strong>
+                        {c.source} §{c.section}
+                      </strong>{" "}
+                      — may be affected by {c.amended_by}. The corpus does not yet
+                      carry the amended text; verify against the official source.
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            {data.case_notes?.length > 0 && (
+              <Card tone="muted">
+                <CardHeader
+                  eyebrow="Case law"
+                  title="How courts have applied this"
+                />
+                <CaseNotes notes={data.case_notes} />
+              </Card>
+            )}
+
+            {!escalated && data.conflicts?.length > 0 && (
+              <Card tone="warn">
+                <CardHeader
+                  eyebrow="Divergent positions"
+                  title="Instruments disagree on this point"
+                />
+                <ConflictList
+                  conflicts={data.conflicts}
+                  citations={data.citations}
+                  onCite={setViewing}
+                />
+              </Card>
+            )}
+
+            <Card tone="muted">
+              <CardHeader
+                eyebrow="ABS check"
+                title={
+                  data.abs_flag
+                    ? "Access & benefit-sharing may apply"
+                    : "No ABS trigger found"
+                }
+                aside={
+                  <Badge tone={data.abs_flag ? "warn" : "neutral"}>
+                    {data.abs_flag ? "Flagged" : "Clear"}
+                  </Badge>
+                }
+              />
+              <p className={styles.absText}>
+                {data.abs_flag
+                  ? data.abs_note ||
+                    "This query touches biological resources — a second retrieval pass over the Biological Diversity Act was run."
+                  : "No biological-resource or traditional-knowledge trigger was detected in this question."}
+              </p>
+            </Card>
+
+            <RetrievalDetails info={data.retrieval} />
+          </div>
+
+          <aside className={styles.rail}>
+            <div className={styles.railBlock}>
+              <h3 className={styles.railTitle}>Confidence</h3>
+              <ConfidenceMeter confidence={data.confidence} />
+            </div>
+
+            <div className={styles.railBlock}>
+              <h3 className={styles.railTitle}>
+                Sources{" "}
+                {data.citations?.length ? `(${data.citations.length})` : ""}
+              </h3>
+              {data.citations?.length ? (
+                <div className={styles.citations}>
+                  {data.citations.map((c, i) => (
+                    <CitationCard
+                      key={c.excerpt_ref || `${c.source}-${c.section}-${i}`}
+                      citation={c}
+                      index={i}
+                      onView={() => setViewing(c)}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className={styles.noCite}>
+                  No passage met the citation bar — the assistant did not invent
+                  one.
+                </p>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
+      <div className={styles.footActions}>
+        {question && (
+          <Button
+            variant="secondary"
+            onClick={() =>
+              navigate("/compare", {
+                state: { query: question, formulationCategory },
+              })
+            }
+          >
+            <Icon name="globe" size={15} />
+            Compare India &amp; International
+          </Button>
+        )}
+        <Button
+          className={styles.newQuery}
+          variant="secondary"
+          onClick={() => navigate("/")}
+        >
+          Start a new query
+        </Button>
+      </div>
+
+      <PassageDrawer citation={viewing} onClose={() => setViewing(null)} />
+    </AppShell>
+  );
+}

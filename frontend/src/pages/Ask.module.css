@@ -1,0 +1,68 @@
+.back {
+  margin-bottom: var(--s-4);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.exLabel {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+.exList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--rule);
+}
+.exList li {
+  border-bottom: 1px solid var(--rule);
+}
+.example {
+  width: 100%;
+  padding: var(--s-3) 0;
+  border: none;
+  background: none;
+  color: var(--ink-700);
+  text-align: left;
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  transition: color var(--dur-1) var(--ease),
+    transform var(--dur-1) var(--ease);
+}
+.example::before {
+  content: "→";
+  flex: none;
+  margin-right: var(--s-3);
+  color: var(--ink-400);
+  transform: translateX(0);
+  transition: transform var(--dur-2) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+.example:hover {
+  color: var(--accent-700);
+  transform: translateX(var(--s-1));
+}
+.example:hover::before {
+  color: var(--accent-500);
+  transform: translateX(var(--s-1));
+}
+
+.submit {
+  align-self: stretch;
+}

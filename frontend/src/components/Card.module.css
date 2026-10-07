@@ -1,0 +1,61 @@
+.card {
+  padding: var(--s-5);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+/* default: the primary "document" panel — quiet, no drop shadow */
+.default {
+  border-color: var(--rule-strong);
+}
+/* muted: a secondary/aside panel, recessed */
+.muted {
+  background: var(--surface-sunken);
+  border-color: var(--rule);
+}
+/* accent / warn / danger: tinted state panels with a left rule for weight */
+.accent {
+  background: var(--accent-50);
+  border-color: var(--accent-100);
+  border-left: 3px solid var(--accent-500);
+}
+.warn {
+  background: var(--escalate-50);
+  border-color: var(--escalate-100);
+  border-left: 3px solid var(--escalate-500);
+}
+.danger {
+  background: var(--flag-50);
+  border-color: var(--flag-100);
+  border-left: 3px solid var(--flag-500);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.eyebrow {
+  margin-bottom: var(--s-1);
+  color: var(--ink-500);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.title {
+  font-size: var(--fs-xl);
+  font-weight: 500;
+}
+
+@media (max-width: 560px) {
+  .card {
+    padding: var(--s-4);
+  }
+  .header {
+    flex-direction: column;
+  }
+}

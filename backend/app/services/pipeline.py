@@ -1,0 +1,176 @@
+"""Query-time orchestration (PRD section 2 flow).
+
+    retrieve (jurisdiction-routed)
+      -> generate (grounded, structured JSON)
+      -> confidence check (retrieval threshold primary)
+      -> [if ABS-triggered] second pass over Biological Diversity Act + Rules
+      -> assemble QueryResponse
+"""
+from __future__ import annotations
+
+from app.config import get_settings
+from app.core.logging import get_logger
+from app.retrieval import get_retriever
+from app.retrieval.expansion import expand_query
+from app.schemas import (
+    AnswerStatus,
+    Confidence,
+    QueryRequest,
+    QueryResponse,
+    RetrievalInfo,
+    SelfConfidence,
+)
+from app.services import (
+    abs_helper,
+    analytics,
+    caselaw,
+    confidence,
+    escalations,
+    faq,
+    generation,
+    query_cache,
+    safety,
+)
+from app.services.jurisdiction import mismatch_note
+
+logger = get_logger(__name__)
+
+
+def _response_from_faq(entry, req: QueryRequest) -> QueryResponse:
+    return QueryResponse(
+        answer=entry.answer,
+        citations=entry.citations,
+        confidence=Confidence(
+            retrieval_score=1.0,
+            self_confidence=SelfConfidence.high,
+            status=AnswerStatus.answered,
+        ),
+        jurisdiction_note=mismatch_note(req.query, req.jurisdiction.value),
+        from_faq=True,
+    )
+
+
+def run_query(req: QueryRequest, *, use_cache: bool = True) -> QueryResponse:
+    # Matter questions carry per-matter document context, so they bypass the
+    # (query, jurisdiction, category)-keyed cache.
+    if req.matter_id:
+        use_cache = False
+
+    faq_hit = faq.match(req.query, req.jurisdiction.value)
+    if faq_hit is not None:
+        logger.info("serving reviewed FAQ %s for %r", faq_hit.id, req.query)
+        resp = _response_from_faq(faq_hit, req)
+        analytics.record(req, resp)
+        return resp
+
+    if use_cache:
+        hit = query_cache.get(req)
+        if hit is not None:
+            logger.info("query cache hit: %r", req.query)
+            analytics.record(req, hit)
+            return hit
+
+    resp = _run_query_uncached(req)
+    query_cache.put(req, resp)
+    analytics.record(req, resp)
+    if resp.confidence.status == AnswerStatus.escalate:
+        escalations.record_from_query(req, resp)
+    return resp
+
+
+def _run_query_uncached(req: QueryRequest) -> QueryResponse:
+    retriever = get_retriever()
+    retrieval_query = expand_query(req.query)
+    if retrieval_query != req.query:
+        logger.info("query expanded for retrieval: %r", retrieval_query)
+    retrieved, top_score = retriever.retrieve(
+        retrieval_query,
+        jurisdiction=req.jurisdiction.value,
+        top_k=8,
+    )
+    # S14: judicial decisions are retrieved for context but never fed to
+    # generation as citable passages — they are shown separately.
+    case_hits = [rc for rc in retrieved if rc.chunk.is_case]
+    chunks = [rc for rc in retrieved if not rc.chunk.is_case][:6]
+    notes = caselaw.case_notes(case_hits)
+
+    # S20: passages from the user's own matter documents — background only.
+    doc_snips = []
+    if req.matter_id and get_settings().matter_docs_enabled:
+        from app.services import matter_docs
+
+        doc_snips = matter_docs.snippets(req.matter_id, req.query, k=3)
+
+    pool_n, pool_sources = retriever.jurisdiction_scope(req.jurisdiction.value)
+    retrieval_info = RetrievalInfo(
+        jurisdiction=req.jurisdiction.value,
+        expanded_query=retrieval_query if retrieval_query != req.query else None,
+        passages_searched=pool_n,
+        sources_searched=pool_sources,
+        top_sections=[
+            f"{rc.chunk.source.split(',')[0]} — Section {rc.chunk.section}"
+            for rc in chunks[:5]
+            if rc.chunk.section
+        ],
+    )
+
+    # High-stakes questions (FTO / infringement / "is my product legal") never
+    # get a retrieval answer, however good the retrieval looks — they escalate.
+    if safety.is_high_stakes(req.query):
+        logger.info("high-stakes question — forced escalate: %r", req.query)
+        return QueryResponse(
+            answer=safety.ESCALATE_NOTE,
+            citations=[],
+            confidence=Confidence(
+                retrieval_score=top_score,
+                self_confidence=SelfConfidence.low,
+                status=AnswerStatus.escalate,
+            ),
+            jurisdiction_note=mismatch_note(req.query, req.jurisdiction.value),
+            retrieval=retrieval_info,
+            case_notes=notes,
+            doc_context=doc_snips,
+        )
+
+    gen = generation.generate(
+        req.query, chunks,
+        context=req.context,
+        doc_context=[s.text for s in doc_snips] or None,
+    )
+    conf = confidence.score(
+        top_score, gen.self_confidence, has_citations=bool(gen.citations)
+    )
+
+    abs_result = abs_helper.run(req.query, req.formulation_category)
+    abs_note = abs_result.note if abs_result.triggered else None
+
+    # Fold ABS citations in so the UI can render them alongside the main answer.
+    citations = list(gen.citations)
+    if abs_result.triggered and abs_result.citations:
+        seen = {(c.source, c.section) for c in citations}
+        for c in abs_result.citations:
+            if (c.source, c.section) not in seen:
+                citations.append(c)
+
+    answer = gen.answer
+    if conf.status == AnswerStatus.escalate and abs_result.triggered and abs_result.answer:
+        # Retrieval was weak on the main pass but ABS pass found something concrete.
+        answer = (
+            f"{gen.answer}\n\nABS note: {abs_result.answer}"
+            if gen.answer
+            else abs_result.answer
+        )
+
+    return QueryResponse(
+        answer=answer,
+        citations=citations,
+        claims=gen.claims,
+        conflicts=gen.conflicts,
+        case_notes=notes,
+        doc_context=doc_snips,
+        confidence=conf,
+        abs_flag=abs_result.triggered,
+        abs_note=abs_note,
+        jurisdiction_note=mismatch_note(req.query, req.jurisdiction.value),
+        retrieval=retrieval_info,
+    )
